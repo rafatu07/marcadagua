@@ -16,6 +16,9 @@ export default function Home() {
   const [loadingFFmpeg, setLoadingFFmpeg] = useState(true);
   const [processingStep, setProcessingStep] = useState('');
   const [quality, setQuality] = useState('balanced'); // fast, balanced, quality
+  const [logoScale, setLogoScale] = useState(100); // Escala do logo (25-200%)
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [generatingPreview, setGeneratingPreview] = useState(false);
   const videoInputRef = useRef(null);
   const logoInputRef = useRef(null);
   const ffmpegRef = useRef(null);
@@ -25,6 +28,13 @@ export default function Home() {
   useEffect(() => {
     loadFFmpeg();
   }, []);
+
+  // Gerar preview quando vídeo, logo ou escala mudarem
+  useEffect(() => {
+    if (videoFile && logoFile) {
+      generatePreview();
+    }
+  }, [videoFile, logoFile, logoScale]);
 
   const loadFFmpeg = async () => {
     try {
@@ -50,6 +60,66 @@ export default function Home() {
       console.error('Erro ao carregar FFmpeg:', error);
       setError('Erro ao carregar o processador de vídeo. Recarregue a página.');
       setLoadingFFmpeg(false);
+    }
+  };
+
+  const generatePreview = async () => {
+    if (!videoFile || !logoFile) return;
+    
+    setGeneratingPreview(true);
+    try {
+      // Criar elementos temporários
+      const video = document.createElement('video');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Carregar vídeo
+      video.src = URL.createObjectURL(videoFile);
+      await new Promise((resolve) => {
+        video.onloadeddata = resolve;
+      });
+      
+      // Buscar frame no meio do vídeo (2 segundos ou meio)
+      video.currentTime = Math.min(2, video.duration / 2);
+      await new Promise((resolve) => {
+        video.onseeked = resolve;
+      });
+      
+      // Configurar canvas com dimensões do vídeo
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      // Desenhar frame do vídeo
+      ctx.drawImage(video, 0, 0);
+      
+      // Carregar logo
+      const logo = new Image();
+      logo.src = URL.createObjectURL(logoFile);
+      await new Promise((resolve) => {
+        logo.onload = resolve;
+      });
+      
+      // Calcular tamanho do logo com escala
+      const logoWidth = (logo.width * logoScale) / 100;
+      const logoHeight = (logo.height * logoScale) / 100;
+      
+      // Desenhar logo no canto superior esquerdo (posição inicial)
+      ctx.drawImage(logo, 10, 10, logoWidth, logoHeight);
+      
+      // Converter para URL
+      const previewDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      setPreviewUrl(previewDataUrl);
+      
+      // Limpar
+      URL.revokeObjectURL(video.src);
+      URL.revokeObjectURL(logo.src);
+      
+      console.log('✅ Preview gerado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao gerar preview:', err);
+      setError('Erro ao gerar preview. Tente outro arquivo.');
+    } finally {
+      setGeneratingPreview(false);
     }
   };
 
@@ -222,17 +292,22 @@ export default function Home() {
       // Efeito DVD bouncing - movimento suave com quique nas bordas
       // O logo percorre TODA a tela do vídeo
       // W = largura do vídeo, H = altura do vídeo
-      // w = largura do logo, h = altura do logo
-      // O logo vai de 0 até (W-w) horizontalmente e 0 até (H-h) verticalmente
+      // overlay_w = largura do logo (após escala), overlay_h = altura do logo (após escala)
+      // O logo vai de 0 até (W-overlay_w) horizontalmente e 0 até (H-overlay_h) verticalmente
       
       // Velocidade de movimento (pixels por segundo)
       const speedX = 100; // velocidade horizontal
       const speedY = 80;  // velocidade vertical
       
+      // Aplicar escala ao logo se necessário
+      const scaleFilter = logoScale !== 100 
+        ? `[1:v]scale=iw*${logoScale/100}:ih*${logoScale/100}[logo];` 
+        : '[1:v]null[logo];';
+      
       // Fórmula: O logo se move pela tela inteira, quicando nas bordas
-      // x: de 0 até (W-w), indo e voltando
-      // y: de 0 até (H-h), indo e voltando
-      const overlayFilter = `overlay=x='if(lte(mod(t*${speedX}\\,2*(W-w))\\,W-w)\\, mod(t*${speedX}\\,W-w)\\, 2*(W-w)-mod(t*${speedX}\\,2*(W-w)))':y='if(lte(mod(t*${speedY}\\,2*(H-h))\\,H-h)\\, mod(t*${speedY}\\,H-h)\\, 2*(H-h)-mod(t*${speedY}\\,2*(H-h)))'`;
+      // x: de 0 até (W-overlay_w), indo e voltando
+      // y: de 0 até (H-overlay_h), indo e voltando
+      const overlayFilter = `${scaleFilter}[0:v][logo]overlay=x='if(lte(mod(t*${speedX}\\,2*(W-overlay_w))\\,W-overlay_w)\\, mod(t*${speedX}\\,W-overlay_w)\\, 2*(W-overlay_w)-mod(t*${speedX}\\,2*(W-overlay_w)))':y='if(lte(mod(t*${speedY}\\,2*(H-overlay_h))\\,H-overlay_h)\\, mod(t*${speedY}\\,H-overlay_h)\\, 2*(H-overlay_h)-mod(t*${speedY}\\,2*(H-overlay_h)))'`;
 
       // Configurações baseadas na qualidade escolhida
       const qualitySettings = {
@@ -438,10 +513,154 @@ export default function Home() {
             )}
           </div>
 
+          {/* Preview Section */}
+          {videoFile && logoFile && (
+            <div className="mb-8">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
+                3️⃣ Ajuste o Tamanho do Logo e Visualize
+              </label>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                {/* Preview Image - Card Miniatura */}
+                <div className="md:col-span-1">
+                  <div className="relative bg-black rounded-lg overflow-hidden shadow-lg border-2 border-gray-300 dark:border-gray-600">
+                    {generatingPreview ? (
+                      <div className="aspect-video flex items-center justify-center">
+                        <div className="flex flex-col items-center">
+                          <svg
+                            className="animate-spin h-8 w-8 text-white mb-2"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            ></circle>
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
+                          </svg>
+                          <p className="text-white text-xs">Gerando...</p>
+                        </div>
+                      </div>
+                    ) : previewUrl ? (
+                      <div className="relative">
+                        <img 
+                          src={previewUrl} 
+                          alt="Preview" 
+                          className="w-full h-auto"
+                        />
+                        <div className="absolute bottom-2 left-2 right-2 bg-black/80 text-white px-2 py-1 rounded text-xs text-center">
+                          Preview do Logo
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
+                    📺 Visualização em miniatura
+                  </p>
+                </div>
+                
+                {/* Logo Size Controls */}
+                <div className="md:col-span-2 space-y-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div>
+                  <div className="flex justify-between mb-2">
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Tamanho do Logo
+                    </label>
+                    <span className="text-sm text-indigo-600 dark:text-indigo-400 font-bold">
+                      {logoScale}%
+                    </span>
+                  </div>
+                  
+                  {/* Slider */}
+                  <input
+                    type="range"
+                    min="25"
+                    max="200"
+                    step="5"
+                    value={logoScale}
+                    onChange={(e) => setLogoScale(parseInt(e.target.value))}
+                    className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600 accent-indigo-600"
+                    disabled={processing}
+                    style={{
+                      background: `linear-gradient(to right, #4F46E5 0%, #4F46E5 ${(logoScale - 25) / 1.75}%, #d1d5db ${(logoScale - 25) / 1.75}%, #d1d5db 100%)`
+                    }}
+                  />
+                  
+                  {/* Scale markers */}
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <span>25%</span>
+                    <span>100%</span>
+                    <span>200%</span>
+                  </div>
+                  
+                  {/* Quick preset buttons */}
+                  <div className="flex gap-2 mt-3">
+                    {[50, 75, 100, 150, 200].map((size) => (
+                      <button
+                        key={size}
+                        onClick={() => setLogoScale(size)}
+                        disabled={processing}
+                        className={`flex-1 px-3 py-2 text-sm font-medium rounded transition-all ${
+                          logoScale === size
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 border border-gray-300 dark:border-gray-500'
+                        } ${processing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
+                      >
+                        {size}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Numeric Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Tamanho Personalizado
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="25"
+                      max="200"
+                      step="1"
+                      value={logoScale}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value) || 100;
+                        setLogoScale(Math.min(200, Math.max(25, value)));
+                      }}
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
+                      disabled={processing}
+                    />
+                    <span className="text-gray-600 dark:text-gray-400 font-medium">%</span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    💡 Ajuste entre 25% (muito pequeno) e 200% (muito grande)
+                  </p>
+                </div>
+                
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      ℹ️ O preview mostra o logo no tamanho e posição inicial. No vídeo final, o logo vai se mover pela tela toda (efeito DVD bouncing).
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Quality Selection */}
           <div className="mb-8">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-              ⚡ Modo de Processamento
+              {videoFile && logoFile ? '4️⃣' : '3️⃣'} Modo de Processamento
             </label>
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
