@@ -7,8 +7,26 @@ import ffmpeg from 'fluent-ffmpeg';
 import Busboy from 'busboy';
 
 // Configurar caminho do FFmpeg (require para evitar problemas com webpack)
-const ffmpegPath = require('ffmpeg-static');
-ffmpeg.setFfmpegPath(ffmpegPath);
+let ffmpegPath;
+try {
+  ffmpegPath = require('ffmpeg-static');
+  if (ffmpegPath) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+    console.log('✅ FFmpeg configurado:', ffmpegPath);
+  } else {
+    console.error('⚠️ FFmpeg não encontrado');
+  }
+} catch (e) {
+  console.error('⚠️ Erro ao carregar FFmpeg:', e.message);
+  // Tentar buscar no sistema
+  try {
+    ffmpeg.setFfmpegPath('ffmpeg');
+    ffmpegPath = 'ffmpeg';
+    console.log('✅ Usando FFmpeg do sistema');
+  } catch (e2) {
+    console.error('❌ FFmpeg não disponível:', e2.message);
+  }
+}
 
 // Helper para parsear FormData usando Busboy
 function parseFormData(req) {
@@ -82,6 +100,11 @@ export async function POST(request) {
 
   try {
     console.log('📥 Recebendo requisição para gerar preview...');
+    
+    // Verificar se FFmpeg está disponível
+    if (!ffmpegPath) {
+      throw new Error('FFmpeg não está disponível no servidor');
+    }
 
     // Parsear FormData
     const { fields, files } = await parseFormData(request);

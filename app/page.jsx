@@ -66,8 +66,21 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erro ao gerar preview');
+        let errorMessage = 'Erro ao gerar preview';
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+          } else {
+            const textError = await response.text();
+            console.error('Resposta não-JSON do servidor:', textError);
+            errorMessage = `Erro do servidor (${response.status}). Verifique os logs.`;
+          }
+        } catch (e) {
+          errorMessage = `Erro ao processar resposta do servidor (${response.status})`;
+        }
+        throw new Error(errorMessage);
       }
 
       const blob = await response.blob();
@@ -208,8 +221,21 @@ export default function Home() {
 
       if (!response.ok) {
         clearInterval(interval);
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erro ao processar vídeo');
+        let errorMessage = 'Erro ao processar vídeo';
+        try {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorMessage;
+          } else {
+            const textError = await response.text();
+            console.error('Resposta não-JSON do servidor:', textError);
+            errorMessage = `Erro do servidor (${response.status}). Verifique os logs.`;
+          }
+        } catch (e) {
+          errorMessage = `Erro ao processar resposta do servidor (${response.status})`;
+        }
+        throw new Error(errorMessage);
       }
 
       setProcessingStep('Recebendo vídeo processado...');

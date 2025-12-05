@@ -295,14 +295,73 @@ O processamento depende de:
 
 ## 🚀 Deploy
 
-### Vercel / Netlify
+### Vercel
 
-⚠️ **Atenção**: Plataformas serverless têm limitações:
-- Timeout de execução (10-60 segundos)
-- Memória limitada
-- Não suportam FFmpeg nativo facilmente
+✅ **Suportado com configurações adicionais**
 
-**Recomendação**: Use VPS ou servidor dedicado.
+#### 📋 Requisitos
+
+1. **Plano Vercel Pro** (recomendado) para:
+   - Timeout de 60s (preview) e 300s (processamento)
+   - Memória de 3GB
+   - Sem limite de tamanho de resposta
+
+2. **Arquivo `vercel.json`** (já incluído):
+   ```json
+   {
+     "functions": {
+       "app/api/generate-preview/route.js": {
+         "maxDuration": 60,
+         "memory": 3008
+       },
+       "app/api/process-video/route.js": {
+         "maxDuration": 300,
+         "memory": 3008
+       }
+     }
+   }
+   ```
+
+#### ⚠️ Limitações no Plano Gratuito
+
+- **Timeout**: 10 segundos apenas
+- **Memória**: 1GB
+- **Resultado**: Preview pode funcionar, mas processamento completo falhará
+
+#### 🔧 Verificando Erros na Vercel
+
+Se aparecer erro `JSON.parse: unexpected character`:
+
+1. **Acesse os Logs da Vercel**:
+   - Dashboard → Seu projeto → Deployments → Clique no deployment → Function Logs
+   
+2. **Verifique se o FFmpeg foi instalado**:
+   - Procure por: `✅ FFmpeg configurado`
+   - Se não aparecer, o `ffmpeg-static` não foi carregado
+
+3. **Verifique timeout**:
+   - Erro `FUNCTION_INVOCATION_TIMEOUT` = vídeo muito grande para o plano
+   - Solução: Upgrade para Pro ou use vídeos menores (<30s)
+
+#### 🐛 Solução de Problemas Vercel
+
+**Erro: "FFmpeg não está disponível no servidor"**
+- O FFmpeg não foi instalado corretamente
+- Verifique se `ffmpeg-static` está em `dependencies` (não devDependencies)
+- Limpe o cache: `vercel --force`
+
+**Erro: "504 Gateway Timeout"**
+- Vídeo muito grande para processar no tempo limite
+- Plano gratuito: use vídeos de até 10 segundos
+- Plano Pro: use vídeos de até 2 minutos
+
+**Erro: "Out of Memory"**
+- Vídeo de resolução muito alta
+- Solução: reduza resolução ou upgrade o plano
+
+### Netlify
+
+⚠️ **Não recomendado**: Netlify Functions tem timeout de 10s (mesmo no plano pago).
 
 ### VPS (DigitalOcean, AWS, etc.)
 
