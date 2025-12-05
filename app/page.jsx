@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 export default function Home() {
   const [videoFile, setVideoFile] = useState(null);
@@ -13,141 +11,76 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [videoSize, setVideoSize] = useState(null);
   const [logoSize, setLogoSize] = useState(null);
-  const [loadingFFmpeg, setLoadingFFmpeg] = useState(true);
   const [processingStep, setProcessingStep] = useState('');
-  const [quality, setQuality] = useState('balanced'); // fast, balanced, quality
-  const [logoScale, setLogoScale] = useState(50); // Escala do logo (0-100%, padrão 50%)
-  const [logoSpeed, setLogoSpeed] = useState(100); // Velocidade (25-200, padrão 100)
-  const [logoOpacity, setLogoOpacity] = useState(100); // Opacidade 0-100%
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const [logoScale, setLogoScale] = useState(50);
+  const [logoSpeed, setLogoSpeed] = useState(50); // 0-100%, padrão 50%
+  const [logoOpacity, setLogoOpacity] = useState(100);
+  const [logoText, setLogoText] = useState('');
+  const [fontFamily, setFontFamily] = useState('Arial');
+  // Controles do texto
+  const [textSize, setTextSize] = useState(100); // Tamanho do texto (50-200%)
+  const [textOpacity, setTextOpacity] = useState(100); // Opacidade do texto (0-100%)
+  const [textPosition, setTextPosition] = useState(0); // Posição vertical (-50 a +50)
   const [previewVideoUrl, setPreviewVideoUrl] = useState(null);
   const [generatingPreview, setGeneratingPreview] = useState(false);
-  const [generatingVideoPreview, setGeneratingVideoPreview] = useState(false);
   const videoInputRef = useRef(null);
   const logoInputRef = useRef(null);
-  const ffmpegRef = useRef(null);
-  const loaded = useRef(false);
 
-  // Carregar FFmpeg quando o componente montar
+  // Gerar preview quando configurações mudarem
   useEffect(() => {
-    loadFFmpeg();
-  }, []);
-
-  // Gerar preview quando vídeo, logo, escala, velocidade ou opacidade mudarem
-  useEffect(() => {
-    if (videoFile && logoFile && loaded.current) {
-      // Debounce para não gerar preview a cada mudança
+    if (videoFile && logoFile) {
       const timer = setTimeout(() => {
         generatePreview();
       }, 500);
       
       return () => clearTimeout(timer);
     }
-  }, [videoFile, logoFile, logoScale, logoSpeed, logoOpacity]);
-
-  const loadFFmpeg = async () => {
-    try {
-      const ffmpeg = new FFmpeg();
-      ffmpegRef.current = ffmpeg;
-
-      // Log de progresso
-      ffmpeg.on('log', ({ message }) => {
-        console.log(message);
-      });
-
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
-
-      loaded.current = true;
-      setLoadingFFmpeg(false);
-      console.log('FFmpeg carregado com sucesso!');
-    } catch (error) {
-      console.error('Erro ao carregar FFmpeg:', error);
-      setError('Erro ao carregar o processador de vídeo. Recarregue a página.');
-      setLoadingFFmpeg(false);
-    }
-  };
+  }, [videoFile, logoFile, logoScale, logoSpeed, logoOpacity, logoText, fontFamily, textSize, textOpacity, textPosition]);
 
   const generatePreview = async () => {
-    if (!videoFile || !logoFile || !loaded.current) return;
+    if (!videoFile || !logoFile) return;
     
-    setGeneratingVideoPreview(true);
-    setPreviewUrl(null); // Limpar preview estático
+    setGeneratingPreview(true);
     setPreviewVideoUrl(null);
     
     try {
-      const ffmpeg = ffmpegRef.current;
+      console.log('🎬 Gerando preview de 5 segundos...');
       
-      console.log('🎬 Gerando preview de vídeo de 5 segundos...');
-      
-      // 1. Carregar vídeo
-      await ffmpeg.writeFile('input_preview.mp4', await fetchFile(videoFile));
-      
-      // 2. Carregar logo
-      await ffmpeg.writeFile('logo_preview.png', await fetchFile(logoFile));
-      
-      // 3. Calcular velocidades baseadas no controle do usuário
-      const speedX = logoSpeed; // 25-200
-      const speedY = logoSpeed * 0.8; // Mantém proporção 100:80
-      
-      // 4. Criar filtros
-      // Escala: 0-100% (0 = invisível, 100 = tamanho original)
-      const scaleFilter = logoScale > 0
-        ? `[1:v]scale=iw*${logoScale/100}:ih*${logoScale/100}` 
-        : '[1:v]null';
-      
-      const opacityFilter = logoOpacity < 100
-        ? `,format=rgba,colorchannelmixer=aa=${logoOpacity/100}`
-        : '';
-      
-      const overlayFilter = `${scaleFilter}${opacityFilter}[logo];[0:v][logo]overlay=x='if(lte(mod(t*${speedX}\\,2*(W-overlay_w))\\,W-overlay_w)\\, mod(t*${speedX}\\,W-overlay_w)\\, 2*(W-overlay_w)-mod(t*${speedX}\\,2*(W-overlay_w)))':y='if(lte(mod(t*${speedY}\\,2*(H-overlay_h))\\,H-overlay_h)\\, mod(t*${speedY}\\,H-overlay_h)\\, 2*(H-overlay_h)-mod(t*${speedY}\\,2*(H-overlay_h)))'`;
-      
-      // 5. Processar apenas 5 segundos com baixa qualidade para preview rápido
-      await ffmpeg.exec([
-        '-i', 'input_preview.mp4',
-        '-i', 'logo_preview.png',
-        '-filter_complex', overlayFilter,
-        '-t', '5', // Apenas 5 segundos
-        '-c:v', 'libx264',
-        '-crf', '28', // Qualidade mais baixa para preview
-        '-preset', 'ultrafast', // Mais rápido
-        '-an', // Sem áudio
-        'preview_output.mp4'
-      ]);
-      
-      console.log('✅ Preview de vídeo gerado!');
-      
-      // 6. Ler e criar URL do preview
-      const data = await ffmpeg.readFile('preview_output.mp4');
-      const url = URL.createObjectURL(
-        new Blob([data.buffer], { type: 'video/mp4' })
-      );
-      
-      setPreviewVideoUrl(url);
-      
-      // 7. Limpar arquivos temporários
-      await ffmpeg.deleteFile('input_preview.mp4');
-      await ffmpeg.deleteFile('logo_preview.png');
-      await ffmpeg.deleteFile('preview_output.mp4');
-      
-    } catch (err) {
-      console.error('Erro ao gerar preview de vídeo:', err);
-      setError('Erro ao gerar preview. Tente arquivos menores.');
-    } finally {
-      setGeneratingVideoPreview(false);
-    }
-  };
+      const formData = new FormData();
+      formData.append('video', videoFile);
+      formData.append('logo', logoFile);
+      formData.append('config', JSON.stringify({
+        logoScale,
+        logoSpeed,
+        logoOpacity,
+        logoText,
+        fontFamily,
+        textSize,
+        textOpacity,
+        textPosition
+      }));
 
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+      const response = await fetch('/api/generate-preview', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao gerar preview');
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setPreviewVideoUrl(url);
+      console.log('✅ Preview gerado com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ Erro ao gerar preview:', error);
+      setError(`Erro ao gerar preview: ${error.message}`);
+    } finally {
+      setGeneratingPreview(false);
+    }
   };
 
   const handleVideoChange = (e) => {
@@ -155,15 +88,13 @@ export default function Home() {
     
     if (!file) return;
 
-    // Verificar se é um vídeo
     if (!file.type.startsWith('video/')) {
       setError('Por favor, selecione um arquivo de vídeo válido.');
       setVideoFile(null);
       return;
     }
 
-    // Verificar tamanho máximo (200MB)
-    const maxSize = 200 * 1024 * 1024; // 200MB em bytes
+    const maxSize = 200 * 1024 * 1024;
     if (file.size > maxSize) {
       setError('O arquivo é muito grande. O tamanho máximo é 200MB.');
       setVideoFile(null);
@@ -181,15 +112,13 @@ export default function Home() {
     
     if (!file) return;
 
-    // Verificar se é uma imagem
     if (!file.type.startsWith('image/')) {
       setError('Por favor, selecione uma imagem válida para o logotipo.');
       setLogoFile(null);
       return;
     }
 
-    // Verificar tamanho máximo (10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB em bytes
+    const maxSize = 10 * 1024 * 1024;
     if (file.size > maxSize) {
       setError('O logotipo é muito grande. O tamanho máximo é 10MB.');
       setLogoFile(null);
@@ -213,200 +142,96 @@ export default function Home() {
       return;
     }
 
-    if (!loaded.current) {
-      setError('Aguarde o carregamento do processador de vídeo.');
-      return;
-    }
-
     setProcessing(true);
     setProgress(0);
     setError(null);
     setProcessedVideoUrl(null);
 
     try {
-      const ffmpeg = ffmpegRef.current;
+      console.log('🎬 Processando vídeo completo...');
+      setProcessingStep('Enviando arquivos...');
+      setProgress(5);
 
-      // 1. Carregar vídeo (0-5%)
-      setProcessingStep('Carregando vídeo...');
-      setProgress(0);
-      await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
-      console.log('Vídeo carregado');
-      setProgress(3);
+      const formData = new FormData();
+      formData.append('video', videoFile);
+      formData.append('logo', logoFile);
+      formData.append('config', JSON.stringify({
+        logoScale,
+        logoSpeed,
+        logoOpacity,
+        logoText,
+        fontFamily,
+        textSize,
+        textOpacity,
+        textPosition
+      }));
 
-      // 2. Carregar logo (3-6%)
-      setProcessingStep('Carregando logotipo...');
-      await ffmpeg.writeFile('logo.png', await fetchFile(logoFile));
-      console.log('Logo carregado');
-      setProgress(6);
-
-      // 3. Detectar duração do vídeo ANTES de processar (6-10%)
-      setProcessingStep('Analisando vídeo...');
-      setProgress(8);
-      
-      let videoDuration = 0;
-      let durationDetected = false;
-      
-      // Listener temporário para capturar duração
-      const durationListener = ({ message }) => {
-        if (!durationDetected) {
-          const durationMatch = message.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/);
-          if (durationMatch) {
-            const hours = parseInt(durationMatch[1]);
-            const minutes = parseInt(durationMatch[2]);
-            const seconds = parseFloat(durationMatch[3]);
-            videoDuration = hours * 3600 + minutes * 60 + seconds;
-            durationDetected = true;
-            console.log(`✅ Duração detectada: ${videoDuration.toFixed(2)}s`);
-          }
-        }
-      };
-      
-      ffmpeg.on('log', durationListener);
-      
-      // Executar FFmpeg apenas para detectar informações do vídeo
-      try {
-        await ffmpeg.exec(['-i', 'input.mp4', '-f', 'null', '-']);
-      } catch (e) {
-        // Erro esperado (null output), mas capturamos a duração
-        console.log('Informações do vídeo capturadas');
-      }
-      
-      ffmpeg.off('log', durationListener);
-      
-      if (videoDuration === 0) {
-        console.warn('⚠️ Não foi possível detectar duração, usando progresso aproximado');
-        videoDuration = 30; // fallback
-      }
-      
-      console.log(`📹 Processando vídeo de ${videoDuration.toFixed(2)}s`);
+      setProcessingStep('Processando vídeo no servidor...');
       setProgress(10);
 
-      // 4. Processar vídeo com efeito DVD bouncing (10-95%)
-      setProcessingStep('Processando vídeo com efeito DVD bouncing...');
+      // Estimar tempo baseado no tamanho do vídeo (aproximadamente 1 segundo por MB)
+      const videoSizeMB = videoFile.size / (1024 * 1024);
+      const estimatedSeconds = Math.max(10, videoSizeMB * 1); // Mínimo 10 segundos
+      const incrementPerSecond = 80 / estimatedSeconds; // 80% do progresso (de 10% a 90%)
       
-      // Configurar listener de progresso em tempo real
-      const progressListener = ({ message }) => {
-        // Capturar progresso em tempo real
-        const timeMatch = message.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/);
-        if (timeMatch && videoDuration > 0) {
-          const hours = parseInt(timeMatch[1]);
-          const minutes = parseInt(timeMatch[2]);
-          const seconds = parseFloat(timeMatch[3]);
-          const currentTime = hours * 3600 + minutes * 60 + seconds;
-          
-          // Calcular progresso real (10% a 95%)
-          // 85% do progresso é dedicado ao processamento do vídeo
-          const processProgress = (currentTime / videoDuration) * 85 + 10;
-          const finalProgress = Math.min(Math.round(processProgress), 95);
-          setProgress(finalProgress);
-          
-          // Log detalhado
-          const percentage = Math.round((currentTime / videoDuration) * 100);
-          console.log(`⏳ Processando: ${currentTime.toFixed(1)}s / ${videoDuration.toFixed(1)}s (${percentage}%) → ${finalProgress}% total`);
-        }
-      };
-      
-      ffmpeg.on('log', progressListener);
+      console.log(`📊 Vídeo ${videoSizeMB.toFixed(2)}MB, tempo estimado: ${estimatedSeconds.toFixed(0)}s`);
 
-      // Efeito DVD bouncing - movimento suave com quique nas bordas
-      // O logo percorre TODA a tela do vídeo
-      // W = largura do vídeo, H = altura do vídeo
-      // overlay_w = largura do logo (após escala), overlay_h = altura do logo (após escala)
-      // O logo vai de 0 até (W-overlay_w) horizontalmente e 0 até (H-overlay_h) verticalmente
-      
-      // Calcular velocidades baseadas no controle do usuário
-      const speedX = logoSpeed; // velocidade horizontal (25-200)
-      const speedY = logoSpeed * 0.8;  // velocidade vertical (mantém proporção 100:80)
-      
-      // Aplicar escala ao logo se necessário
-      // Escala: 0-100% (0 = invisível, 100 = tamanho original)
-      const scaleFilter = logoScale > 0
-        ? `[1:v]scale=iw*${logoScale/100}:ih*${logoScale/100}` 
-        : '[1:v]null';
-      
-      // Aplicar opacidade se necessário
-      const opacityFilter = logoOpacity < 100
-        ? `,format=rgba,colorchannelmixer=aa=${logoOpacity/100}`
-        : '';
-      
-      // Fórmula: O logo se move pela tela inteira, quicando nas bordas
-      // x: de 0 até (W-overlay_w), indo e voltando
-      // y: de 0 até (H-overlay_h), indo e voltando
-      const overlayFilter = `${scaleFilter}${opacityFilter}[logo];[0:v][logo]overlay=x='if(lte(mod(t*${speedX}\\,2*(W-overlay_w))\\,W-overlay_w)\\, mod(t*${speedX}\\,W-overlay_w)\\, 2*(W-overlay_w)-mod(t*${speedX}\\,2*(W-overlay_w)))':y='if(lte(mod(t*${speedY}\\,2*(H-overlay_h))\\,H-overlay_h)\\, mod(t*${speedY}\\,H-overlay_h)\\, 2*(H-overlay_h)-mod(t*${speedY}\\,2*(H-overlay_h)))'`;
+      // Simular progresso baseado no tempo estimado
+      const startTime = Date.now();
+      const interval = setInterval(() => {
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        const estimatedProgress = 10 + (elapsedSeconds * incrementPerSecond);
+        
+        setProgress(prev => {
+          const newProgress = Math.min(90, Math.round(estimatedProgress));
+          if (newProgress > prev) {
+            // Atualizar mensagem baseado no progresso
+            if (newProgress < 30) {
+              setProcessingStep('Analisando vídeo...');
+            } else if (newProgress < 60) {
+              setProcessingStep('Aplicando marca d\'água...');
+            } else if (newProgress < 85) {
+              setProcessingStep('Processando com qualidade máxima...');
+            } else {
+              setProcessingStep('Finalizando...');
+            }
+            return newProgress;
+          }
+          return prev;
+        });
+      }, 1000); // Atualizar a cada segundo
 
-      // Configurações baseadas na qualidade escolhida
-      const qualitySettings = {
-        fast: {
-          preset: 'ultrafast',
-          crf: '28',
-          description: 'Processamento muito rápido, qualidade boa'
-        },
-        balanced: {
-          preset: 'veryfast',
-          crf: '25',
-          description: 'Equilíbrio entre velocidade e qualidade'
-        },
-        quality: {
-          preset: 'medium',
-          crf: '23',
-          description: 'Melhor qualidade, processamento mais lento'
-        }
-      };
+      const response = await fetch('/api/process-video', {
+        method: 'POST',
+        body: formData
+      });
 
-      const settings = qualitySettings[quality];
-      console.log(`Executando FFmpeg com preset: ${settings.preset}, CRF: ${settings.crf}`);
-
-      await ffmpeg.exec([
-        '-i', 'input.mp4',
-        '-i', 'logo.png',
-        '-filter_complex', overlayFilter,
-        '-c:v', 'libx264',
-        '-crf', settings.crf,
-        '-preset', settings.preset,
-        '-c:a', 'copy',
-        '-movflags', '+faststart', // Otimização para streaming
-        'output.mp4'
-      ]);
-      
-      // Remover listener de progresso
-      ffmpeg.off('log', progressListener);
-
-      console.log('✅ Processamento de vídeo concluído!');
-      setProgress(95);
-
-      // 5. Ler o vídeo processado (95-97%)
-      setProcessingStep('Lendo vídeo processado...');
-      const data = await ffmpeg.readFile('output.mp4');
-      setProgress(97);
-      
-      // 6. Criar arquivo final (97-99%)
-      setProcessingStep('Criando arquivo para download...');
-      const url = URL.createObjectURL(
-        new Blob([data.buffer], { type: 'video/mp4' })
-      );
-      setProgress(99);
-      
-      setProcessedVideoUrl(url);
-      setProgress(100);
-      setProcessingStep('Concluído! 🎉');
-      console.log('🎉 Vídeo pronto para download!');
-
-      // 7. Limpar arquivos temporários
-      try {
-        await ffmpeg.deleteFile('input.mp4');
-        await ffmpeg.deleteFile('logo.png');
-        await ffmpeg.deleteFile('output.mp4');
-        console.log('🧹 Arquivos temporários limpos');
-      } catch (e) {
-        console.log('⚠️ Erro ao limpar arquivos temporários:', e);
+      if (!response.ok) {
+        clearInterval(interval);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao processar vídeo');
       }
 
-    } catch (err) {
-      console.error('Erro ao processar:', err);
-      setError(`Erro ao processar o vídeo: ${err.message || 'Erro desconhecido'}`);
+      setProcessingStep('Recebendo vídeo processado...');
+      setProgress(90);
+      const blob = await response.blob();
+      clearInterval(interval);
+      
+      setProgress(95);
+      setProcessingStep('Criando arquivo para download...');
+      
+      const url = URL.createObjectURL(blob);
+      setProcessedVideoUrl(url);
+      
+      setProgress(100);
+      setProcessingStep('Concluído! 🎉');
+      console.log('🎉 Vídeo processado com sucesso!');
+
+    } catch (error) {
+      console.error('❌ Erro ao processar:', error);
+      setError(`Erro ao processar o vídeo: ${error.message}`);
     } finally {
       setProcessing(false);
-      setProcessingStep('');
     }
   };
 
@@ -415,748 +240,605 @@ export default function Home() {
 
     const a = document.createElement('a');
     a.href = processedVideoUrl;
-    a.download = `video_com_marca_${Date.now()}.mp4`;
+    a.download = 'video_com_marca_dagua.mp4';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
-  const handleReset = () => {
-    setVideoFile(null);
-    setLogoFile(null);
-    setProcessedVideoUrl(null);
-    setError(null);
-    setProgress(0);
-    setVideoSize(null);
-    setLogoSize(null);
-    if (videoInputRef.current) {
-      videoInputRef.current.value = '';
-    }
-    if (logoInputRef.current) {
-      logoInputRef.current.value = '';
-    }
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-yellow-50 dark:from-gray-900 dark:via-purple-900 dark:to-gray-900 py-8 px-4">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
-            🎬 Marca d&apos;água Animada em Vídeo
+        <div className="text-center mb-8">
+          <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600 mb-3">
+            🎬 Marca d&apos;água Animada
           </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-300">
-            Adicione um logotipo animado (estilo DVD bouncing) aos seus vídeos
+          <p className="text-gray-600 dark:text-gray-300 text-lg">
+            Adicione logo animado (DVD bouncing) em seus vídeos com qualidade máxima
           </p>
+          <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded-lg">
+            <span className="text-yellow-800 dark:text-yellow-200 font-semibold">✨ Máxima Qualidade</span>
+            <span className="text-xs text-yellow-600 dark:text-yellow-400">(CRF 23)</span>
+          </div>
         </div>
 
-        {/* Main Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 mb-8">
-          {/* Video Upload Section */}
-          <div className="mb-8">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-              1️⃣ Selecione o vídeo
-            </label>
+        {/* Main Content */}
+        <div className="grid md:grid-cols-2 gap-6 mb-6">
+          
+          {/* Upload Section */}
+          <div className="space-y-6">
             
-            <div className="flex items-center justify-center w-full">
-              <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:hover:border-gray-500 transition-colors">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <svg
-                    className="w-12 h-12 mb-3 text-gray-500 dark:text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">
-                    <span className="font-semibold">Clique para fazer upload do vídeo</span>
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    MP4, AVI, MOV (máx. 200MB)
-                  </p>
-                </div>
+            {/* Video Upload */}
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+              <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2">
+                🎥 Vídeo
+              </h2>
+              
+              <div 
+                onClick={() => videoInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                  videoFile 
+                    ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' 
+                    : 'border-gray-300 dark:border-gray-600 hover:border-purple-400 dark:hover:border-purple-500'
+                }`}
+              >
                 <input
                   ref={videoInputRef}
                   type="file"
-                  className="hidden"
                   accept="video/*"
                   onChange={handleVideoChange}
+                  className="hidden"
                   disabled={processing}
                 />
-              </label>
+                
+                {videoFile ? (
+                  <div className="space-y-2">
+                    <div className="text-4xl">✅</div>
+                    <p className="font-medium text-gray-800 dark:text-white">{videoFile.name}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{formatFileSize(videoSize)}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-4xl">📹</div>
+                    <p className="font-medium text-gray-700 dark:text-gray-300">Clique para selecionar vídeo</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Máximo 200MB</p>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Selected Video Info */}
-            {videoFile && (
-              <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <svg
-                      className="w-8 h-8 text-green-600 dark:text-green-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                      />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {videoFile.name}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {formatFileSize(videoSize)}
-                      </p>
-                    </div>
-                  </div>
-                  {!processing && (
-                    <button
-                      onClick={() => {
-                        setVideoFile(null);
-                        setVideoSize(null);
-                        if (videoInputRef.current) videoInputRef.current.value = '';
-                      }}
-                      className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Preview Section */}
-          {videoFile && logoFile && (
-            <div className="mb-8">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-                3️⃣ Ajuste o Tamanho do Logo e Visualize
-              </label>
+            {/* Logo Upload */}
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+              <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2">
+                🖼️ Logotipo
+              </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                {/* Preview de Vídeo - Card Miniatura */}
-                <div className="md:col-span-1">
-                  <div className="relative bg-black rounded-lg overflow-hidden shadow-lg border-2 border-indigo-500 dark:border-indigo-400">
-                    {generatingVideoPreview ? (
-                      <div className="aspect-video flex items-center justify-center">
-                        <div className="flex flex-col items-center">
-                          <svg
-                            className="animate-spin h-8 w-8 text-white mb-2"
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle
-                              className="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              strokeWidth="4"
-                            ></circle>
-                            <path
-                              className="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                            ></path>
-                          </svg>
-                          <p className="text-white text-xs">Gerando preview...</p>
-                          <p className="text-gray-400 text-xs mt-1">~10-20 segundos</p>
-                        </div>
-                      </div>
-                    ) : previewVideoUrl ? (
-                      <div className="relative">
-                        <video 
-                          src={previewVideoUrl}
-                          controls
-                          loop
-                          autoPlay
-                          muted
-                          className="w-full h-auto"
-                        />
-                        <div className="absolute bottom-2 left-2 right-2 bg-black/80 text-white px-2 py-1 rounded text-xs text-center">
-                          Preview 5s - Loop
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="aspect-video flex items-center justify-center">
-                        <p className="text-gray-400 text-xs">Carregue vídeo e logo</p>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-                    🎬 Preview de 5 segundos
-                  </p>
-                </div>
-                
-                {/* Logo Size Controls */}
-                <div className="md:col-span-2 space-y-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Tamanho do Logo
-                    </label>
-                    <span className="text-sm text-indigo-600 dark:text-indigo-400 font-bold">
-                      {logoScale}%
-                    </span>
-                  </div>
-                  
-                  {/* Slider */}
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={logoScale}
-                    onChange={(e) => setLogoScale(parseInt(e.target.value))}
-                    className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600 accent-indigo-600"
-                    disabled={processing}
-                    style={{
-                      background: `linear-gradient(to right, #4F46E5 0%, #4F46E5 ${logoScale}%, #d1d5db ${logoScale}%, #d1d5db 100%)`
-                    }}
-                  />
-                  
-                  {/* Scale markers */}
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <span>0%</span>
-                    <span>50%</span>
-                    <span>100%</span>
-                  </div>
-                  
-                  {/* Quick preset buttons */}
-                  <div className="flex gap-2 mt-3">
-                    {[10, 25, 50, 75, 100].map((size) => (
-                      <button
-                        key={size}
-                        onClick={() => setLogoScale(size)}
-                        disabled={processing}
-                        className={`flex-1 px-3 py-2 text-sm font-medium rounded transition-all ${
-                          logoScale === size
-                            ? 'bg-indigo-600 text-white shadow-md'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 border border-gray-300 dark:border-gray-500'
-                        } ${processing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
-                      >
-                        {size}%
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Numeric Input */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Tamanho Personalizado
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={logoScale}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 50;
-                        setLogoScale(Math.min(100, Math.max(0, value)));
-                      }}
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                      disabled={processing}
-                    />
-                    <span className="text-gray-600 dark:text-gray-400 font-medium">%</span>
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    💡 0% = invisível, 50% = metade, 100% = tamanho original
-                  </p>
-                </div>
-                
-                {/* Controle de Velocidade */}
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Velocidade do Movimento
-                    </label>
-                    <span className="text-sm text-green-600 dark:text-green-400 font-bold">
-                      {logoSpeed}%
-                    </span>
-                  </div>
-                  
-                  <input
-                    type="range"
-                    min="25"
-                    max="200"
-                    step="5"
-                    value={logoSpeed}
-                    onChange={(e) => setLogoSpeed(parseInt(e.target.value))}
-                    className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600 accent-green-600"
-                    disabled={processing}
-                  />
-                  
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <span>Lento (25%)</span>
-                    <span>Normal (100%)</span>
-                    <span>Rápido (200%)</span>
-                  </div>
-                  
-                  <div className="flex gap-2 mt-3">
-                    {[50, 100, 150].map((speed) => (
-                      <button
-                        key={speed}
-                        onClick={() => setLogoSpeed(speed)}
-                        disabled={processing}
-                        className={`flex-1 px-3 py-2 text-sm font-medium rounded transition-all ${
-                          logoSpeed === speed
-                            ? 'bg-green-600 text-white shadow-md'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 border border-gray-300 dark:border-gray-500'
-                        } ${processing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
-                      >
-                        {speed === 50 ? '🐢 Lento' : speed === 100 ? '➡️ Normal' : '🚀 Rápido'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Controle de Transparência */}
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Transparência do Logo
-                    </label>
-                    <span className="text-sm text-purple-600 dark:text-purple-400 font-bold">
-                      {logoOpacity}%
-                    </span>
-                  </div>
-                  
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={logoOpacity}
-                    onChange={(e) => setLogoOpacity(parseInt(e.target.value))}
-                    className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-600 accent-purple-600"
-                    disabled={processing}
-                  />
-                  
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <span>Transparente (0%)</span>
-                    <span>Meio (50%)</span>
-                    <span>Opaco (100%)</span>
-                  </div>
-                  
-                  <div className="flex gap-2 mt-3">
-                    {[30, 50, 75, 100].map((opacity) => (
-                      <button
-                        key={opacity}
-                        onClick={() => setLogoOpacity(opacity)}
-                        disabled={processing}
-                        className={`flex-1 px-2 py-2 text-xs font-medium rounded transition-all ${
-                          logoOpacity === opacity
-                            ? 'bg-purple-600 text-white shadow-md'
-                            : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 border border-gray-300 dark:border-gray-500'
-                        } ${processing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
-                      >
-                        {opacity}%
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    💡 0% = invisível, 100% = totalmente opaco
-                  </p>
-                </div>
-                
-                  <div className="pt-2 border-t border-gray-200 dark:border-gray-600">
-                    <p className="text-xs text-gray-600 dark:text-gray-400">
-                      ℹ️ O preview de 5 segundos mostra exatamente como o logo ficará no vídeo final com movimento DVD bouncing.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Quality Selection */}
-          <div className="mb-8">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-              {videoFile && logoFile ? '4️⃣' : '3️⃣'} Modo de Processamento
-            </label>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Fast */}
-              <button
-                type="button"
-                onClick={() => setQuality('fast')}
-                disabled={processing}
-                className={`p-4 rounded-lg border-2 transition-all ${
-                  quality === 'fast'
-                    ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                    : 'border-gray-300 dark:border-gray-600 hover:border-green-400'
-                } ${processing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              <div 
+                onClick={() => logoInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                  logoFile 
+                    ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20' 
+                    : 'border-gray-300 dark:border-gray-600 hover:border-pink-400 dark:hover:border-pink-500'
+                }`}
               >
-                <div className="flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Rápido ⚡</h3>
-                <p className="text-xs text-gray-600 dark:text-gray-400">
-                  ~2-3x mais rápido
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Qualidade: Boa
-                </p>
-              </button>
-
-              {/* Balanced */}
-              <button
-                type="button"
-                onClick={() => setQuality('balanced')}
-                disabled={processing}
-                className={`p-4 rounded-lg border-2 transition-all ${
-                  quality === 'balanced'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-gray-300 dark:border-gray-600 hover:border-blue-400'
-                } ${processing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <div className="flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                  </svg>
-                </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Equilibrado ⚖️</h3>
-                <p className="text-xs text-gray-600 dark:text-gray-400">
-                  Recomendado
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Qualidade: Ótima
-                </p>
-              </button>
-
-              {/* Quality */}
-              <button
-                type="button"
-                onClick={() => setQuality('quality')}
-                disabled={processing}
-                className={`p-4 rounded-lg border-2 transition-all ${
-                  quality === 'quality'
-                    ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                    : 'border-gray-300 dark:border-gray-600 hover:border-purple-400'
-                } ${processing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <div className="flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                  </svg>
-                </div>
-                <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Alta Qualidade ✨</h3>
-                <p className="text-xs text-gray-600 dark:text-gray-400">
-                  Mais lento
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Qualidade: Máxima
-                </p>
-              </button>
-            </div>
-
-            <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-              <p className="text-xs text-gray-600 dark:text-gray-400">
-                {quality === 'fast' && '⚡ Modo Rápido: Processamento 2-3x mais rápido com boa qualidade. Ideal para testes e vídeos para redes sociais.'}
-                {quality === 'balanced' && '⚖️ Modo Equilibrado (Recomendado): Ótimo balanço entre velocidade e qualidade. Perfeito para a maioria dos casos.'}
-                {quality === 'quality' && '✨ Alta Qualidade: Melhor qualidade possível, mas processamento mais lento. Ideal para vídeos profissionais.'}
-              </p>
-            </div>
-          </div>
-
-          {/* Logo Upload Section */}
-          <div className="mb-8">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-              2️⃣ Selecione o logotipo (marca d&apos;água)
-            </label>
-            
-            <div className="flex items-center justify-center w-full">
-              <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-purple-300 border-dashed rounded-lg cursor-pointer bg-purple-50 dark:hover:bg-purple-900/20 dark:bg-purple-900/10 hover:bg-purple-100 dark:border-purple-600 dark:hover:border-purple-500 transition-colors">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <svg
-                    className="w-12 h-12 mb-3 text-purple-500 dark:text-purple-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <p className="mb-2 text-sm text-purple-600 dark:text-purple-400">
-                    <span className="font-semibold">Clique para fazer upload do logotipo</span>
-                  </p>
-                  <p className="text-xs text-purple-500 dark:text-purple-400">
-                    PNG, JPG, SVG (máx. 10MB) - Recomendado: PNG transparente
-                  </p>
-                </div>
                 <input
                   ref={logoInputRef}
                   type="file"
-                  className="hidden"
                   accept="image/*"
                   onChange={handleLogoChange}
+                  className="hidden"
                   disabled={processing}
                 />
-              </label>
+                
+                {logoFile ? (
+                  <div className="space-y-2">
+                    <div className="text-4xl">✅</div>
+                    <p className="font-medium text-gray-800 dark:text-white">{logoFile.name}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{formatFileSize(logoSize)}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-4xl">🎨</div>
+                    <p className="font-medium text-gray-700 dark:text-gray-300">Clique para selecionar logo</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">PNG com transparência • Máximo 10MB</p>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Selected Logo Info */}
-            {logoFile && (
-              <div className="mt-4 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <svg
-                      className="w-8 h-8 text-purple-600 dark:text-purple-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                      />
-                    </svg>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {logoFile.name}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {formatFileSize(logoSize)}
-                      </p>
-                    </div>
-                  </div>
-                  {!processing && (
-                    <button
-                      onClick={() => {
-                        setLogoFile(null);
-                        setLogoSize(null);
-                        if (logoInputRef.current) logoInputRef.current.value = '';
-                      }}
-                      className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Error Message */}
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <div className="flex items-center">
-                <svg
-                  className="w-5 h-5 text-red-600 dark:text-red-400 mr-2"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
+          {/* Preview Section */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+            <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2">
+              👁️ Ajuste o Tamanho do Logo e Visualize
+            </h2>
+            
+            <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden mb-4 flex items-center justify-center border-2 border-purple-500/30">
+              {generatingPreview ? (
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-3"></div>
+                  <p className="text-white text-sm">Gerando preview...</p>
+                </div>
+              ) : previewVideoUrl ? (
+                <video
+                  src={previewVideoUrl}
+                  controls
+                  autoPlay
+                  loop
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="text-center text-gray-400">
+                  <div className="text-5xl mb-3">🎬</div>
+                  <p className="text-sm">Carregue vídeo e logo</p>
+                </div>
+              )}
+            </div>
+            
+            <p className="text-center text-xs text-purple-600 dark:text-purple-400 font-medium flex items-center justify-center gap-1">
+              🎥 Preview de 5 segundos
+            </p>
+          </div>
+
+        </div>
+
+        {/* Controls Section */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+          <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-white flex items-center gap-2">
+            ⚙️ Controles do Logo
+          </h2>
+          
+          <div className="grid md:grid-cols-2 gap-6">
+            
+            {/* Tamanho do Logo */}
+            <div>
+              <div className="flex justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  📏 Tamanho do Logo
+                </label>
+                <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                  {logoScale}%
+                </span>
+              </div>
+              
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={logoScale}
+                onChange={(e) => setLogoScale(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                disabled={processing}
+              />
+              
+              <div className="flex gap-2 mt-3">
+                {[10, 25, 50, 75, 100].map(size => (
+                  <button
+                    key={size}
+                    onClick={() => setLogoScale(size)}
+                    className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                      logoScale === size
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                    }`}
+                    disabled={processing}
+                  >
+                    {size}%
+                  </button>
+                ))}
+              </div>
+              
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={logoScale}
+                onChange={(e) => setLogoScale(Math.min(100, Math.max(0, Number(e.target.value))))}
+                className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                disabled={processing}
+              />
+            </div>
+
+            {/* Velocidade */}
+            <div>
+              <div className="flex justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  ⚡ Velocidade do Movimento
+                </label>
+                <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                  {logoSpeed}%
+                </span>
+              </div>
+              
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={logoSpeed}
+                onChange={(e) => setLogoSpeed(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                disabled={processing}
+              />
+              
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setLogoSpeed(10)}
+                  className={`flex-1 px-3 py-1 text-xs rounded-lg transition-colors ${
+                    logoSpeed === 10
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                  }`}
+                  disabled={processing}
                 >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
+                  🐢 Lento
+                </button>
+                <button
+                  onClick={() => setLogoSpeed(50)}
+                  className={`flex-1 px-3 py-1 text-xs rounded-lg transition-colors ${
+                    logoSpeed === 50
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                  }`}
+                  disabled={processing}
+                >
+                  ⚡ Normal
+                </button>
+                <button
+                  onClick={() => setLogoSpeed(100)}
+                  className={`flex-1 px-3 py-1 text-xs rounded-lg transition-colors ${
+                    logoSpeed === 100
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                  }`}
+                  disabled={processing}
+                >
+                  🚀 Rápido
+                </button>
               </div>
             </div>
-          )}
 
-          {/* Process Button */}
+            {/* Transparência */}
+            <div>
+              <div className="flex justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  👻 Transparência do Logo
+                </label>
+                <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                  {logoOpacity}%
+                </span>
+              </div>
+              
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={logoOpacity}
+                onChange={(e) => setLogoOpacity(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                disabled={processing}
+              />
+              
+              <div className="flex gap-2 mt-3">
+                {[30, 50, 75, 100].map(opacity => (
+                  <button
+                    key={opacity}
+                    onClick={() => setLogoOpacity(opacity)}
+                    className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                      logoOpacity === opacity
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-purple-100 dark:hover:bg-purple-900/30'
+                    }`}
+                    disabled={processing}
+                  >
+                    {opacity}%
+                  </button>
+                ))}
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* Controles do Texto */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+          <h2 className="text-xl font-semibold mb-6 text-gray-800 dark:text-white flex items-center gap-2">
+            ✏️ Texto (Opcional)
+          </h2>
+          
+          {/* Input do Texto */}
+          <div className="mb-6">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+              Digite o Texto
+            </label>
+            <input
+              type="text"
+              value={logoText}
+              onChange={(e) => setLogoText(e.target.value)}
+              placeholder="Ex: Esse é um produto vendido por..."
+              maxLength={50}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 text-base"
+              disabled={processing}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              💡 O texto aparecerá acima do logo e se moverá junto com ele
+            </p>
+          </div>
+
+          {/* Controles do Texto (aparecem quando há texto) */}
+          {logoText.trim() && (
+            <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-semibold mb-4 text-gray-700 dark:text-gray-300">
+                Ajustes do Texto
+              </h3>
+              
+              <div className="grid md:grid-cols-3 gap-6">
+              
+              {/* Tamanho do Texto */}
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    📏 Tamanho do Texto
+                  </label>
+                  <span className="text-sm font-bold text-yellow-600 dark:text-yellow-400">
+                    {textSize}%
+                  </span>
+                </div>
+                
+                <input
+                  type="range"
+                  min="50"
+                  max="400"
+                  value={textSize}
+                  onChange={(e) => setTextSize(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                  disabled={processing}
+                />
+                
+                <div className="flex gap-2 mt-3">
+                  {[100, 200, 300, 400].map(size => (
+                    <button
+                      key={size}
+                      onClick={() => setTextSize(size)}
+                      className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                        textSize === size
+                          ? 'bg-yellow-600 text-white'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
+                      }`}
+                      disabled={processing}
+                    >
+                      {size}%
+                    </button>
+                  ))}
+                </div>
+                
+                <input
+                  type="number"
+                  min="50"
+                  max="400"
+                  value={textSize}
+                  onChange={(e) => setTextSize(Math.min(400, Math.max(50, Number(e.target.value))))}
+                  className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
+                  disabled={processing}
+                />
+              </div>
+
+              {/* Transparência do Texto */}
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    👻 Transparência do Texto
+                  </label>
+                  <span className="text-sm font-bold text-yellow-600 dark:text-yellow-400">
+                    {textOpacity}%
+                  </span>
+                </div>
+                
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={textOpacity}
+                  onChange={(e) => setTextOpacity(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                  disabled={processing}
+                />
+                
+                <div className="flex gap-2 mt-3">
+                  {[50, 75, 100].map(opacity => (
+                    <button
+                      key={opacity}
+                      onClick={() => setTextOpacity(opacity)}
+                      className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                        textOpacity === opacity
+                          ? 'bg-yellow-600 text-white'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
+                      }`}
+                      disabled={processing}
+                    >
+                      {opacity}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Posição do Texto */}
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    📍 Distância do Logo
+                  </label>
+                  <span className="text-sm font-bold text-yellow-600 dark:text-yellow-400">
+                    {textPosition < 0 ? `${Math.abs(textPosition)}px ⬆️` : textPosition > 0 ? `${textPosition}px ⬇️` : 'Normal'}
+                  </span>
+                </div>
+                
+                <input
+                  type="range"
+                  min="-50"
+                  max="50"
+                  value={textPosition}
+                  onChange={(e) => setTextPosition(Number(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                  disabled={processing}
+                />
+                
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => setTextPosition(-30)}
+                    className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                      textPosition === -30
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
+                    }`}
+                    disabled={processing}
+                  >
+                    ⬆️ Longe
+                  </button>
+                  <button
+                    onClick={() => setTextPosition(0)}
+                    className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                      textPosition === 0
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
+                    }`}
+                    disabled={processing}
+                  >
+                    ↔️ Normal
+                  </button>
+                  <button
+                    onClick={() => setTextPosition(30)}
+                    className={`flex-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                      textPosition === 30
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-yellow-100 dark:hover:bg-yellow-900/30'
+                    }`}
+                    disabled={processing}
+                  >
+                    ⬇️ Perto
+                  </button>
+                </div>
+              </div>
+
+              {/* Fonte do Texto */}
+              <div className="md:col-span-3 mt-2">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                  🔤 Fonte do Texto
+                </label>
+                <select
+                  value={fontFamily}
+                  onChange={(e) => setFontFamily(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  disabled={processing}
+                >
+                  <option value="Arial">Arial</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Verdana">Verdana</option>
+                  <option value="Comic Sans MS">Comic Sans MS</option>
+                  <option value="Impact">Impact</option>
+                  <option value="Calibri">Calibri</option>
+                </select>
+              </div>
+
+              </div>
+
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                💡 <strong>Texto e logo se movem juntos!</strong> Tamanho do texto vai até 400% (muito grande). A distância ajusta o espaço entre texto e logo: valores negativos afastam (⬆️), positivos aproximam (⬇️).
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Process Button */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
           <button
             onClick={handleProcess}
             disabled={!videoFile || !logoFile || processing}
-            className="w-full bg-indigo-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all"
+            className={`w-full py-4 rounded-xl font-semibold text-lg transition-all ${
+              !videoFile || !logoFile || processing
+                ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
+            }`}
           >
-            {processing ? (
-              <span className="flex items-center justify-center">
-                <svg
-                  className="animate-spin -ml-1 mr-3 h-6 w-6 text-white"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                Processando...
-              </span>
-            ) : (
-              '🎬 Processar Vídeo com Logo Animado'
-            )}
+            {processing ? '⏳ Processando...' : '🎬 Processar Vídeo'}
           </button>
 
-          {/* Loading FFmpeg */}
-          {loadingFFmpeg && (
-            <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-              <div className="flex items-center justify-center">
-                <svg
-                  className="animate-spin h-5 w-5 text-blue-600 dark:text-blue-400 mr-3"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <span className="text-sm text-blue-700 dark:text-blue-300">
-                  Carregando processador de vídeo...
+          {/* Progress Bar */}
+          {processing && (
+            <div className="mt-4">
+              <div className="flex justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {processingStep}
                 </span>
+                <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                  {progress}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-600 to-pink-600 transition-all duration-300 rounded-full"
+                  style={{ width: `${progress}%` }}
+                />
               </div>
             </div>
           )}
 
-          {/* Progress Bar */}
-          {processing && (
-            <div className="mt-6">
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {processingStep || 'Processando...'}
-                </span>
-                <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-                  {progress}%
-                </span>
+          {/* Error Message */}
+          {error && (
+            <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-red-600 dark:text-red-400 text-sm">❌ {error}</p>
+            </div>
+          )}
+
+          {/* Download Section */}
+          {processedVideoUrl && (
+            <div className="mt-6 p-6 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-300 dark:border-green-700 rounded-xl">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-green-800 dark:text-green-200 mb-1">
+                    🎉 Vídeo Processado!
+                  </h3>
+                  <p className="text-sm text-green-600 dark:text-green-400">
+                    Seu vídeo com marca d&apos;água está pronto
+                  </p>
+                </div>
+                <button
+                  onClick={handleDownload}
+                  className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 whitespace-nowrap"
+                >
+                  📥 Download
+                </button>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-3 dark:bg-gray-700 overflow-hidden">
-                <div
-                  className="bg-indigo-600 h-3 rounded-full transition-all duration-500 ease-out"
-                  style={{ width: `${progress}%` }}
-                ></div>
+              
+              {/* Video Preview - Tamanho Limitado */}
+              <div className="flex justify-center">
+                <div className="w-full max-w-2xl">
+                  <video
+                    src={processedVideoUrl}
+                    controls
+                    className="w-full max-h-96 rounded-lg border-2 border-green-300 dark:border-green-700 object-contain bg-black"
+                  />
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Result Section */}
-        {processedVideoUrl && (
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 animate-fade-in">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
-              <svg
-                className="w-7 h-7 mr-2 text-green-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Vídeo Processado com Sucesso!
-            </h2>
-
-            {/* Video Player */}
-            <div className="mb-6 rounded-lg overflow-hidden bg-black">
-              <video
-                src={processedVideoUrl}
-                controls
-                className="w-full h-auto"
-                style={{ maxHeight: '500px' }}
-              >
-                Seu navegador não suporta o elemento de vídeo.
-              </video>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button
-                onClick={handleDownload}
-                className="flex-1 bg-green-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-green-700 transition-colors shadow-lg hover:shadow-xl flex items-center justify-center"
-              >
-                <svg
-                  className="w-6 h-6 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                  />
-                </svg>
-                Download do Vídeo
-              </button>
-
-              <button
-                onClick={handleReset}
-                className="flex-1 bg-gray-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-gray-700 transition-colors shadow-lg hover:shadow-xl flex items-center justify-center"
-              >
-                <svg
-                  className="w-6 h-6 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-                Processar Outro Vídeo
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Footer Info */}
-        <div className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
-          <p>💡 O logotipo percorre 100% da tela do vídeo como o clássico logo de DVD</p>
-          <p className="mt-2">🎯 Use modo "Rápido ⚡" para processamento 2-3x mais veloz</p>
-          <p className="mt-2">✨ Efeito bouncing: o logo quica perfeitamente em todas as bordas</p>
-          <p className="mt-2">🔒 100% privado: tudo processa no seu navegador</p>
+        {/* Footer */}
+        <div className="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">
+          <p>✨ Processamento 100% no servidor • Qualidade máxima garantida</p>
         </div>
       </div>
     </div>
   );
 }
-
-
