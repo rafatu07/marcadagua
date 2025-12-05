@@ -1,0 +1,12 @@
+# Vercel Ignore File
+node_modules
+.next
+.git
+.DS_Store
+*.log
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+README.md
+
